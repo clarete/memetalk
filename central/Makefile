@@ -1,4 +1,4 @@
-subdirs = std linux reflection re2 kaiser ometa memescript bindgen curl
+subdirs = std linux reflection re2 kaiser ometa memescript bindgen
 
 all:
 	$(foreach el,$(subdirs),$(MAKE) -C $(el) all;)
