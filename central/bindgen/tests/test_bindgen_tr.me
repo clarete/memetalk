@@ -1,16 +1,20 @@
 meme central:memescript/0.0.3/compiler
 
-requires test, io, bindgen, definitions_pr, definitions_tr
+requires test, io, mirror, bindgen, definitions_pr, definitions_tr
 where
   definitions_pr = central:bindgen/0.0.1/definitions_pr
   definitions_tr = central:bindgen/0.0.1/definitions_tr
   bindgen        = central:bindgen/0.0.1/bindgen
   io             = central:linux/0.0.1/io
+  mirror         = central:reflection/0.0.1/mirror
 
   import Fun from definitions_tr
   import Param from definitions_tr
   import Struct from definitions_tr
+  import FuncPointer from definitions_tr
   import Module from definitions_tr
+
+  import Mirror from mirror
 end
 
 // Translate strings
@@ -141,6 +145,7 @@ testTypedefDefinitions: fun() {
 
   // Function pointer
   var output2 = tr("typedef int (*foo)(long a)", :typedef, :typedef, [m]);
+  test.assertEqual(Mirror.vtFor(output2).toString, FuncPointer.toString, "output2 isinstance FuncPointer"); // This .toString is a lil ugly but it's breaking without it
   test.assertEqual(output2.getName(), "foo", "FuncPointer.getName");
   test.assertEqual(output2.getRType().getTypeName(), "int", "FuncPointer.getRType.getTypeName");
   test.assertEqual(output2.getParams()[0].getTypeName(), "long", "FuncPointer.getParams()[0].getTypeName");

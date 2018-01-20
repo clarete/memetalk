@@ -20,6 +20,12 @@
 
 #include <vm.hpp>
 
+#define MEME_BINDGEN_CB_C_CALLBACK 2
+
+#define MEME_BINDGEN_DT_PROC       2
+#define MEME_BINDGEN_DT_M_CALLBACK 3
+#define MEME_BINDGEN_DT_DATA       4
+
 static oop lookup_bottom_instance(MMObj* mmobj, oop obj) {
   if (obj == MM_NULL) {
     return NULL;
@@ -30,30 +36,35 @@ static oop lookup_bottom_instance(MMObj* mmobj, oop obj) {
   }
 }
 
-static inline void* get_field(oop instance) {
-  return ((oop*)instance)[2]; //@self
+static inline void* get_field(oop instance, int field) {
+  return ((oop*)instance)[field];
 }
 
-static inline void set_field(oop bottom_instance, void* obj) {
-  ((oop*)bottom_instance)[2] = (oop) obj;
+static inline void set_field(oop bottom_instance, int field, void* obj) {
+  ((oop*)bottom_instance)[field] = (oop) obj;
 }
 
 static inline void* get_instance(MMObj* mmobj, oop memeobj) {
   oop bottom = lookup_bottom_instance(mmobj, memeobj);
   if (bottom) {
-    return get_field(bottom);
+    return get_field(bottom, 2);
   }
   return NULL;
 }
 
 static void set_instance(MMObj* mmobj, oop memeobj, void* obj) {
   oop bottom = lookup_bottom_instance(mmobj, memeobj);
-  set_field(bottom, obj);
+  set_field(bottom, 2, obj);
 }
 
 static oop get_meme_class(Process* proc, const char *name) {
   int exc = 0;
   return proc->send_0(proc->mp(), proc->vm()->new_symbol(name), &exc);
+}
+
+static bool is_instance(Process* proc, oop obj, const char *class_name) {
+  return proc->mmobj()->delegates_to(proc->mmobj()->mm_object_vt(obj),
+                                     get_meme_class(proc, class_name));
 }
 
 static oop meme_instance(Process* proc, const char *name, void* obj) {
@@ -64,8 +75,6 @@ static oop meme_instance(Process* proc, const char *name, void* obj) {
 }
 
 static void* meme_obj_c_void(Process* proc, oop o) {
-  void* value;
-
   if (is_small_int(o)) {
     volatile uintptr_t iptr = untag_small_int(o);
     unsigned int *ptr = (unsigned int *)iptr;
@@ -76,9 +85,11 @@ static void* meme_obj_c_void(Process* proc, oop o) {
     return ptr;
   } else if (proc->mmobj()->mm_object_vt(o) == proc->vm()->core()->get_prime("String")) {
     return proc->mmobj()->mm_string_cstr(proc, o);
+  } else if (is_instance(proc, o, "Callback")) {
+    return get_field(o, MEME_BINDGEN_CB_C_CALLBACK);
+  } else if (is_instance(proc, o, "CallbackData")) {
+    return o;
   } else {
-    proc->raise("TypeError", "Couldn't guess meme type");
+    return NULL;
   }
-
-  return value;
 }

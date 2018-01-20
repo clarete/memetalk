@@ -63,7 +63,7 @@ paramlist
 typed = type_with_annotations | type_list_or_id | varargs;
 type_with_annotations = type_list_or_id:x spaces type_annotation+:as
     => [[:annotations, x[0], as], x[1]];
-type_annotation = "+" {``out`` | ``null``}:x =>  x;
+type_annotation = "+" {``out`` | ``null`` | ``data``}:x =>  x;
 varargs = ``...`` => [:varargs];
 
 type_list_or_id = type_list | type_id | type_only;

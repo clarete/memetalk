@@ -3,10 +3,11 @@ meme central:memescript/0.0.3/compiler
 @author: Lincoln Clarete <lincoln@clarete.li>;
 @license: MIT;
 
-requires io, ext, ometa_base, definitions_pr, definitions_tr
+requires io, ext, vm, ometa_base, definitions_pr, definitions_tr
 where
   io = central:linux/0.0.1/io
   ext = central:std/0.0.3/ext
+  vm = central:reflection/0.0.1/vm
   ometa_base = central:ometa/0.0.2/ometa_base
   definitions_pr = central:bindgen/0.0.1/definitions_pr
   definitions_tr = central:bindgen/0.0.1/definitions_tr
@@ -43,6 +44,35 @@ end
 //
 //     struct {}
 
+// Custom callback wrappers must extend this class
+class CallbackData
+  fields: proc, callback, data;
+  init new: fun(callback, data) {
+    @proc = vm.get_current_process();
+    @callback = callback;
+    @data = data;
+  }
+end
+
+class Callback
+  fields: c_callback, callback, data;
+  init new: fun(callback) {
+    this.set_c_callback();
+    @callback = callback;
+  }
+  init new_with_data: fun(callback, data) {
+    this.set_c_callback();
+    @callback = callback;
+    @data = data;
+  }
+  instance_method data: fun() {
+    return CallbackData.new(@callback, @data);
+  }
+  instance_method set_c_callback: fun () {
+    Exception.throw("Callback setting not implement");
+  }
+end
+
 // Shortcuts
 parseRule: fun(content, rule) {
   return ometa_base.parse(content, SyscallDefinitionsParser, rule)[1];
@@ -51,16 +81,27 @@ parse: fun(content) {
   return parseRule(content, :start);
 }
 translateRule: fun(defs, rule, args) {
+  var output = null;
   if (args == null) {
-    return ometa_base.parse(
-      defs, SyscallDefinitionsTranslator, rule)[1];
+    output = ometa_base.parse(
+      defs, SyscallDefinitionsTranslator, rule);
   } else {
-    return ometa_base.parse_with_args(
-      defs, SyscallDefinitionsTranslator, rule, args)[1];
+    output = ometa_base.parse_with_args(
+      defs, SyscallDefinitionsTranslator, rule, args);
   }
+  if (output[0]) {
+    Exception.throw(output[0].toString);
+  }
+  return output[1];
 }
 translate: fun(defs) {
   return translateRule(defs, :start, null);
+}
+translateStringAtRule: fun (contents, rule, args) {
+  return translateRule([parse(contents)], rule, args);
+}
+translateString: fun(contents, name) {
+  return translateStringAtRule(contents, :module, [name]);
 }
 main: fun() {
   var args = ext.argv();
@@ -70,7 +111,7 @@ main: fun() {
 
     // File name without extension will name the primitives module
     var fileName = path.split("/").last().split(".")[0];
-    io.print(translateRule([parse(contents)], :module, [fileName]));
+    io.print(translateString(contents, fileName));
   }
   return 0;
 }

@@ -10,6 +10,7 @@ where
   import Fun from types
   import Module from types
   import Typedef from types
+  import FuncPointer from types
 end
 
 numericTypes: [
@@ -120,6 +121,229 @@ testGenChkArgTypedef: fun() {
   ].join("\n");
   test.assertEqual(output, expected, "genReadParam#3");
 }
+// Test generating callback signature
+testGenFuncPointerCallbackSignature: fun() {
+  // Given a FuncPointer that returns size_t
+  var funcPointer = FuncPointer.new("fooncPointer");
+  funcPointer.getRType().setTypeName("size_t");
+
+  // And given that it has three parameters
+  var p1 = funcPointer.newChild;
+  p1.setName("a");
+  p1.setTypeName("char");
+  p1.setIsPointer(true);
+  var p2 = funcPointer.newChild;
+  p2.setName("b");
+  p2.setTypeName("long");
+  var p3 = funcPointer.newChild;
+  p3.setName("c");
+  p3.setTypeName("void");
+  p3.setIsPointer(true);
+
+  // When the signature is generated
+  var output = funcPointer.genSignature();
+
+  // Then it should generate the right output
+  var expected = "static size_t callback_fooncPointer(char * param_a, long param_b, void * param_c)";
+  test.assertEqual(output, expected, "testGenFuncPointerCallbackSignature()");
+}
+// Test code generated for unpacking the callback data when there's no
+// parameter marked as callback data.
+testGenFuncPointerUnpackCallbackDataNoData: fun() {
+  // Given a FuncPointer object with no parameters
+  var funcPointer = FuncPointer.new("fooncPointer");
+
+  // When header is generated
+  var output = funcPointer.genUnpackCallbackData();
+
+  // Then it should be empty
+  test.assertEqual(output, "", "testGenFuncPointerUnpackCallbackDataNoData()");
+}
+// Test code generated for unpacking the callback data
+testGenFuncPointerUnpackCallbackData: fun() {
+  // Given a FuncPointer object
+  var funcPointer = FuncPointer.new("fooncPointer");
+
+  // And given the parameter is marked as callback data
+  var p1 = funcPointer.newChild;
+  p1.setName("cb_data");
+  p1.setTypeName("void");
+  p1.setIsPointer(true);
+  p1.setIsData(true);
+
+  // When header is generated
+  var output = funcPointer.genUnpackCallbackData();
+
+  // Then it should generate code that unpacks the callback within the
+  // data field
+  var stm_var = fun(type, name, value) {
+    return types.c_stm(2, types.c_declare(type, types.c_assign(name, types.c_cast(type, value))));
+  };
+  var expected = [
+    stm_var("oop", "wrapper", "param_cb_data"),
+    stm_var("oop", "procinst", "get_field(wrapper, MEME_BINDGEN_DT_PROC)"),
+    stm_var("oop", "fun", "get_field(wrapper, MEME_BINDGEN_DT_M_CALLBACK)"),
+    stm_var("oop", "data", "get_field(wrapper, MEME_BINDGEN_DT_DATA)"),
+    stm_var("Process*", "proc", "get_field(procinst, 2)"),
+  ].join("\n");
+  test.assertEqual(output, expected, "testGenFuncPointerUnpackCallbackData()");
+}
+// Test generating code to push parameters for a function with no
+// params
+testGenFuncPointerParametersNoParams: fun() {
+  // Given a FuncPointer object with no parameters
+  var funcPointer = FuncPointer.new("fooncPointer");
+
+  // When params are generated
+  var output = funcPointer.genPushParams();
+
+  // Then it should output nothing
+  test.assertEqual(output, "", "testGenFuncPointerParametersNoParams()");
+}
+// Test generating pushing the parameters for a function pointer to
+// the stack
+testGenFuncPointerParameters: fun() {
+  // Given a FuncPointer object with three parameters
+  var funcPointer = FuncPointer.new("fooncPointer");
+  var p1 = funcPointer.newChild;
+  p1.setName("a");
+  p1.setTypeName("char");
+  p1.setIsPointer(true);
+  var p2 = funcPointer.newChild;
+  p2.setName("b");
+  p2.setTypeName("long");
+  var p3 = funcPointer.newChild;
+  p3.setName("c");
+  p3.setTypeName("size_t");
+
+  // When params are generated
+  var output = funcPointer.genPushParams();
+
+  // Then it should generate the pushing of the parameters to the
+  // stack according to their type
+  var expected = [
+    types.c_comment(2, "Push function parameters to the stack"),
+    types.c_stm(2, "proc->stack_push(" + types.cc_wrap_type(p1, p1, "param_a") + ")"),
+    types.c_stm(2, "proc->stack_push(" + types.cc_wrap_type(p2, p2, "param_b") + ")"),
+    types.c_stm(2, "proc->stack_push(" + types.cc_wrap_type(p3, p3, "param_c") + ")"),
+  ].join("\n");
+  test.assertEqual(output, expected, "testGenFuncPointerParameters()");
+}
+// Test generating code for pushing parameters with data field
+testGenFuncPointerParametersWithData: fun() {
+  // Given a FuncPointer object with two parameters
+  var funcPointer = FuncPointer.new("fooncPointer");
+  var p1 = funcPointer.newChild;
+  p1.setName("a");
+  p1.setTypeName("char");
+  p1.setIsPointer(true);
+  var p2 = funcPointer.newChild;
+  p2.setName("data");
+  p2.setTypeName("void");
+  p2.setIsPointer(true);
+  p2.setIsData(true);
+
+  // When params are generated
+  var output = funcPointer.genPushParams();
+
+  // Then it should generate the pushing of the parameters to the
+  // stack according to their type but the parameter marked as data
+  // won't be pushed. The data field on it will instead.
+  var expected = [
+    types.c_comment(2, "Push function parameters to the stack"),
+    types.c_stm(2, "proc->stack_push(" + types.cc_wrap_type(p1, p1, "param_a") + ")"),
+    types.c_stm(2, "proc->stack_push(data)"),
+  ].join("\n");
+  test.assertEqual(output, expected, "testGenFuncPointerParametersWithData()");
+}
+// Test generating code for executing callback
+testGenFuncPointerCall: fun() {
+  // Given a FuncPointer object
+  var funcPointer = FuncPointer.new("fooncPointer");
+
+  // And given the above FuncPointer return type is int
+  funcPointer.getRType().setTypeName("int");
+
+  // When the code is generated
+  var output = funcPointer.genCall();
+
+  // Then it should execute the function and cast the result
+  var expected = [
+    types.c_comment(2, "Call function"),
+    types.c_stm(2, types.c_declare("int", types.c_assign("exc", "0"))),
+    types.c_stm(2, types.c_declare("oop", types.c_assign("output", "proc->do_call(fun, &exc)"))),
+    types.c_stm(2, types.c_return(types.c_cast("int", "meme_obj_c_void(proc, output)"))),
+  ].join("\n");
+  test.assertEqual(output, expected, "testGenFuncPointerCall()");
+}
+// Test generating callback code
+testGenFuncPointerCallback: fun() {
+  // Given a func pointer with two parameters
+  var funcPointer = FuncPointer.new("fooncPointer");
+  funcPointer.getRType().setTypeName("long");
+  var p1 = funcPointer.newChild;
+  p1.setName("a");
+  p1.setTypeName("char");
+  p1.setIsPointer(true);
+  var p2 = funcPointer.newChild;
+  p2.setName("data");
+  p2.setTypeName("void");
+  p2.setIsPointer(true);
+  p2.setIsData(true);
+
+  // When code is generated
+  var output = funcPointer.genCallback();
+
+  // Then it should generate the whole function
+  var expected = [
+    funcPointer.genSignature(),
+    "{",
+    funcPointer.genUnpackCallbackData(),
+    funcPointer.genPushParams(),
+    funcPointer.genCall(),
+    "}",
+  ].join("\n");
+  test.assertEqual(output, expected, "testGenFuncPointerCallback()");
+}
+// Test generating primitive for registering callback
+testGenFuncPointerPrim: fun() {
+  // Given a funcPointer instance
+  var funcPointer = FuncPointer.new("fp");
+
+  // When the primitive is generated
+  var output = funcPointer.genPrimFunc();
+
+  // Then output must contain the code for the function
+  var expected = [
+    "static int prim_callback_fp(Process* proc)",
+    "{",
+    "  oop self = proc->dp();",
+    "  set_field(self, MEME_BINDGEN_CB_C_CALLBACK, (void *) callback_fp);",
+    "  proc->stack_push(self);",
+    "  return 0;",
+    "}",
+  ].join("\n");
+  test.assertEqual(output, expected, "testGenFuncPointerPrim()");
+}
+// Test a minimally complex function pointer
+testGenFuncPointerTypedef: fun() {
+  // Given a module and a function pointer with three parameter
+  var m = Module.new("m");
+  var input = "typedef long (*foonc)(int a, long b, size_t c)";
+
+  // When it's translated to the C binding
+  var output = bindgen.translateRule(
+    [bindgen.parseRule(input, :typedef)],
+    :typedef, [m]);
+
+  // Then it should generate the code for both
+  var expected = [
+    output.genCallback(),
+    output.genPrimFunc(),
+  ].join("\n");
+  test.assertEqual(output.toString(), expected, "testGenFuncPointerTypedef()");
+}
+
 // void foo();
 testGenFunCallVoid: fun() {
   var m = Module.new("m");
@@ -136,7 +360,7 @@ testGenFunCallVoid: fun() {
   var expected = [
     types.c_stm(2, "foo ()"),
     types.c_comment(2, "Push output to the stack"),
-    types.c_stm(2, types.c_return("MM_NULL"))
+    types.c_stm(2, types.c_push("MM_NULL"))
   ].join("\n");
   test.assertEqual(output, expected, "call for `void foo()`");
 }
@@ -156,7 +380,7 @@ testGenFunCallInt: fun() {
     types.c_stm(2, types.c_declare("int", types.c_assign("output", "foo ()"))),
     types.c_stm(2, types.c_declare("oop", types.c_assign("oop_output", "tag_small_int(output)"))),
     types.c_comment(2, "Push output to the stack"),
-    types.c_stm(2, types.c_return("oop_output"))
+    types.c_stm(2, types.c_push("oop_output"))
   ].join("\n");
 
   test.assertEqual(output, expected, "call for `int foo()`");
@@ -168,6 +392,16 @@ main: fun() {
   testGenReadParam();
   testGenReadParam2();
   testGenChkArgTypedef();
+  testGenFuncPointerCallbackSignature();
+  testGenFuncPointerUnpackCallbackDataNoData();
+  testGenFuncPointerUnpackCallbackData();
+  testGenFuncPointerParametersNoParams();
+  testGenFuncPointerParameters();
+  testGenFuncPointerParametersWithData();
+  testGenFuncPointerCall();
+  testGenFuncPointerCallback();
+  testGenFuncPointerPrim();
+  testGenFuncPointerTypedef();
   testGenFunCallVoid();
   testGenFunCallInt();
 }

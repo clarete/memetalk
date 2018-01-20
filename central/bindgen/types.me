@@ -54,8 +54,17 @@ c_declare: fun(type, varn) {
 c_assign: fun(varn, val) {
   return varn + " = " + val;
 }
-c_return: fun(what) {
+c_cast: fun(type, exp) {
+  return "(" + type + ") " + exp;
+}
+c_dec_cast_assign: fun(type, name, val) {
+  return c_declare(type, c_assign(name, c_cast(type, val)));
+}
+c_push: fun(what) {
   return "proc->stack_push(" + what + ")";
+}
+c_return: fun(what) {
+  return "return " + what;
 }
 c_type_error: fun(msg) {
   return "proc->raise(\"TypeError\", \"" + msg + "\")";
@@ -104,31 +113,32 @@ cc_find_primes: fun(param) {
   }
   return primes;
 }
-cc_wrap_type: fun(param, ogparam) {
+cc_wrap_type: fun(param, ogparam, varn) {
   var typeName = param.getTypeName();
   var className = ogparam.getTypeName().replace_all(" ", "_");
   if (typeName.substr(0, 7) == "struct ") {
     typeName = "struct";
   }
   var wrap = {
-    "": "tag_small_int(output)", // e.g.: `unsigned foo`
-    "int": "tag_small_int(output)",
-    "long": "proc->mmobj()->mm_longnum_new(proc, output)",
-    "char": "proc->mmobj()->mm_string_new(output)",
-    "struct": "meme_instance(proc, \"" + className + "\", output)"
+    "": "tag_small_int(" + varn + ")", // e.g.: `unsigned foo`
+    "int": "tag_small_int(" + varn + ")",
+    "long": "proc->mmobj()->mm_longnum_new(proc, " + varn + ")",
+    "size_t": "proc->mmobj()->mm_longnum_new(proc, " + varn + ")",
+    "char": "proc->mmobj()->mm_string_new(" + varn + ")",
+    "struct": "meme_instance(proc, \"" + className + "\", " + varn + ")"
   }[typeName];
   if (!wrap) {
     Exception.throw("Unknown type `" + typeName + "'");
   }
   return wrap;
 }
-c_cast: fun(type, exp) {
-  return "(" + type + ") " + exp;
+c_get_field: fun(varn, field) {
+  return "get_field(" + varn + ", " + field + ")";
 }
 
 class Param
   fields: name, typeName, isPointer, isArray, isConst, isUnsigned,
-    isOutput, isNullable, isUnknown;
+    isOutput, isNullable, isData, isUnknown;
 
   init new: fun() {
     @isPointer = false;
@@ -137,6 +147,7 @@ class Param
     @isUnsigned = false;
     @isOutput = false;
     @isNullable = false;
+    @isData = false;
     @isUnknown = false;
   }
   instance_method setName: fun(name) { @name = name; }
@@ -147,6 +158,7 @@ class Param
   instance_method setIsUnsigned: fun(isUnsigned) { @isUnsigned = isUnsigned; }
   instance_method setIsOutput: fun(isOutput) { @isOutput = isOutput; }
   instance_method setIsNullable: fun(isNullable) { @isNullable = isNullable; }
+  instance_method setIsData: fun(isData) { @isData = isData; }
   instance_method setIsUnknown: fun(isUnknown) { @isUnknown = isUnknown; }
   instance_method setAnnotations: fun(annotations) {
     annotations.each(fun(_, a) {
@@ -154,6 +166,8 @@ class Param
         this.setIsOutput(true);
       } elif (a == "null") {
         this.setIsNullable(true);
+      } elif (a == "data") {  // see FuncPointer.genUnpackCallbackData
+        this.setIsData(true);
       }
     });
   }
@@ -166,6 +180,7 @@ class Param
   instance_method getIsUnsigned: fun() { return @isUnsigned; }
   instance_method getIsOutput: fun() { return @isOutput; }
   instance_method getIsNullable: fun() { return @isNullable; }
+  instance_method getIsData: fun() { return @isData; }
   instance_method getIsUnknown: fun() { return @isUnknown; }
 
   instance_method genType: fun() {
@@ -267,15 +282,15 @@ class Fun
         return [
           c_stm(2, [this.getName(), params].join(" ")),
           c_comment(2, "Push output to the stack"),
-          c_stm(2, c_return("MM_NULL"))
+          c_stm(2, c_push("MM_NULL"))
         ].join("\n");
       }
 
       return [
         c_stm(2, c_declare(rtype.genType(), c_assign("output", [this.getName(), params].join(" ")))),
-        c_stm(2, c_declare("oop", c_assign("oop_output", cc_wrap_type(resolvedType, rtype)))),
+        c_stm(2, c_declare("oop", c_assign("oop_output", cc_wrap_type(resolvedType, rtype, "output")))),
         c_comment(2, "Push output to the stack"),
-        c_stm(2, c_return("oop_output"))
+        c_stm(2, c_push("oop_output"))
       ].join("\n");
     }
     return "";
@@ -373,6 +388,75 @@ class FuncPointer
     @params.append(param);
     return param;
   }
+  // -- Output functions
+  instance_method genSignature: fun() {
+    var params = @params.map(fun(p) { p.genType + " param_" + p.getName }).join(", ");
+    return "static " + @rtype.getTypeName() + " callback_" + @name + "(" + params + ")";
+  }
+  instance_method genUnpackCallbackData: fun() {
+    var vstm = fun(type, name, value) {
+      return c_stm(2, c_dec_cast_assign(type, name, value));
+    };
+    @params.each(fun(_, p) {
+      if (p.getIsData()) {
+        var output = [];
+        output.append(vstm("oop", "wrapper", "param_" + p.getName()));
+        output.append(vstm("oop", "procinst", c_get_field("wrapper", "MEME_BINDGEN_DT_PROC")));
+        output.append(vstm("oop", "fun", c_get_field("wrapper", "MEME_BINDGEN_DT_M_CALLBACK")));
+        output.append(vstm("oop", "data", c_get_field("wrapper", "MEME_BINDGEN_DT_DATA")));
+        output.append(vstm("Process*", "proc", c_get_field("procinst", "2")));
+        ^ output.join("\n");
+      }
+    });
+    return "";
+  }
+  instance_method genPushParams: fun() {
+    var output = @params.map(fun(i) {
+      if (i.getIsData()) {
+        return c_stm(2, c_push("data"));
+      }
+      return c_stm(2, c_push(cc_wrap_type(i, i, "param_" + i.getName)));
+    });
+    if (output.size > 0) {
+      output.prepend(c_comment(2, "Push function parameters to the stack"));
+    }
+    return output.join("\n");
+  }
+  instance_method genCall: fun() {
+    var output = [];
+    output.append(c_comment(2, "Call function"));
+    output.append(c_stm(2, c_declare("int", c_assign("exc", "0"))));
+    output.append(c_stm(2, c_declare("oop", c_assign("output", "proc->do_call(fun, &exc)"))));
+    output.append(c_stm(2, c_return(c_cast(@rtype.getTypeName(), "meme_obj_c_void(proc, output)"))));
+    return output.join("\n");
+  }
+  instance_method genCallback: fun() {
+    var output = [];
+    output.append(this.genSignature());
+    output.append("{");
+    output.append(this.genUnpackCallbackData());
+    output.append(this.genPushParams());
+    output.append(this.genCall());
+    output.append("}");
+    return output.join("\n");
+  }
+  instance_method genPrimFunc: fun() {
+    return [
+      "static int prim_callback_" + @name + "(Process* proc)",
+      "{",
+      "  oop self = proc->dp();",
+      "  set_field(self, MEME_BINDGEN_CB_C_CALLBACK, (void *) callback_" + @name + ");",
+      "  proc->stack_push(self);",
+      "  return 0;",
+      "}",
+    ].join("\n");
+  }
+  instance_method toString: fun() {
+    return [
+      this.genCallback(),
+      this.genPrimFunc(),
+    ].join("\n");
+  }
 end
 
 class Module
@@ -383,7 +467,7 @@ class Module
     @includes = [];
     @structs = [];
     @typedefs = {};
-    @funcPointers = {};
+    @funcPointers = [];
     @funs = [];
   }
   instance_method appendInclude: fun(include) {
@@ -398,7 +482,7 @@ class Module
     return o;
   }
   instance_method appendFuncPointer: fun(o) {
-    @funcPointers[o.getName()] = o;
+    @funcPointers.append(o);
     return o;
   }
   instance_method appendFun: fun(o) {
@@ -418,27 +502,30 @@ class Module
     return param;
   }
   instance_method genMainFunction: fun(moduleName) {
-    var output = ["void init_primitives_" + moduleName + " (VM *vm) {"];
+    var output = ["extern \"C\" void init (VM *vm) {"];
     @funs.each(fun(_, d) {
       var prim_name = moduleName + "_" + d.getName();
       output.append("  vm->register_primitive(\"" + prim_name + "\", prim_" + d.getName() + ");");
+    });
+    output.append("");
+    output.append(c_comment(2, "Add primitives for callbacks"));
+    @funcPointers.each(fun(_, fp) {
+      var func_name = "callback_" + fp.getName();
+      var prim_name = moduleName + "_" + func_name;
+      output.append("  vm->register_primitive(\"" + prim_name + "\", prim_" + func_name + ");");
     });
     output.append("}");
     return output.join("\n");
   }
   instance_method toString: fun() {
-    var output = [];
-    output.append("#include <vm.hpp>");
-    output.append("#include <bindgen.hpp>");
-    output.append(@includes.map(fun(i) { "#include " + i.toString }).join("\n\n"));
-    output.append("");
-    output.append("static std::map<void*, oop> meme_mapping;\n");
-    output.append("");
-    output.append(@structs.map(fun(i) { i.toString }).join("\n"));
-    output.append("");
-    output.append(@funs.map(fun(i) { i.gen(this) }).join("\n\n"));
-    output.append("");
-    output.append(this.genMainFunction(@name));
-    return output.join("\n");
+    return [
+      "#include <vm.hpp>",
+      "#include <bindgen.hpp>",
+      @includes.map(fun(i) { "#include " + i.toString }).join("\n\n"),
+      @structs.map(fun(i) { i.toString }).join("\n"),
+      @funcPointers.map(fun(i) { i.toString }).join("\n"),
+      @funs.map(fun(i) { i.gen(this) }).join("\n\n"),
+      this.genMainFunction(@name)
+    ].join("\n\n");
   }
 end
