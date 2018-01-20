@@ -1,0 +1,58 @@
+meme central:memescript/0.0.3/compiler
+
+requires io, curl
+where
+  io = central:linux/0.0.1/io
+  curl = central:curl/0.0.1/curl
+end
+
+main: fun() {
+  curl.global_init(curl.CURL_GLOBAL_DEFAULT);
+
+  // init the curl session
+  var curl_handle = curl.easy_init();
+
+  // specify URL to get
+  var opt1 = curl.easy_setopt(curl_handle, curl.CURLOPT_URL, "http://172.17.0.1");
+  if (opt1 != curl.CURLE_OK) {
+    io.print("curl_easy_setopt() failed: " + curl.easy_strerror(opt1));
+    return -1;
+  }
+
+  var opt2 = curl.easy_setopt(curl_handle, curl.CURLOPT_PORT, 8000);
+  if (opt2 != curl.CURLE_OK) {
+    io.print("curl_easy_setopt() failed: " + curl.easy_strerror(opt2));
+    return -1;
+  }
+
+  // send all data to this function
+  var chunk = "";
+  var wrapper = curl.WriteCallbackWrapper.new(fun (contents, size, nmemb, userdata) {
+    chunk += contents;
+    return chunk.size;
+  });
+  curl.easy_setopt(curl_handle, curl.CURLOPT_WRITEFUNCTION, wrapper);
+  curl.easy_setopt(curl_handle, curl.CURLOPT_WRITEDATA, wrapper.data);
+
+  // some servers don't like requests that are made without a
+  // user-agent field, so we provide one
+  curl.easy_setopt(curl_handle, curl.CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+  // get it!
+  var res = curl.easy_perform(curl_handle);
+
+  // check for errors
+  if (res != curl.CURLE_OK) {
+    io.print("curl_easy_perform() failed: " + curl.easy_strerror(res));
+  } else {
+    // Now, our chunk.memory points to a memory block that is
+    // chunk.size bytes big and contains the remote file.
+    //
+    // Do something nice with it!
+    io.print("Retrieved data: " + chunk.size.toString);
+  }
+
+  curl.global_cleanup();
+
+  return 0;
+}
