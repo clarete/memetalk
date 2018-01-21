@@ -14,13 +14,14 @@ class SyscallDefinitionsParser < OMetaBase
 
 <ometa>
 
-start = definition*:xs => xs;
+start = definition*:xs => xs.filter(fun(i) { i != null });
 
 definition
     = prefix typedef:t => t
     | prefix func:f => f
     | prefix include:i => i
     | prefix struct_def:s => s
+    | {~prefix _}* '\n' => null
     ;
 
 prefix = spaces '//' 'sys';

@@ -11,6 +11,8 @@ where
   import CallbackData from bindgen
 end
 
+//sys #include <curl/curl.h>
+
 // CURL_GLOBAL_*
 CURL_GLOBAL_SSL:       fun() { return (1<<0); }
 CURL_GLOBAL_WIN32:     fun() { return (1<<1); }
@@ -1070,10 +1072,15 @@ CURLOPT_MIMEPOST: fun() { return CURLOPTTYPE_OBJECTPOINT + 269; }
 
 CURLOPT_LASTENTRY: 270; // the last unused
 
+//sys typedef int CURLcode
+//sys typedef int CURLoption
+
+//sys typedef struct _ CURL
 class CURL
   fields: self;
 end
 
+//sys typedef size_t (*curl_write_callback)(char *buffer, size_t size, size_t nitems, void *outstream +data)
 class WriteCallbackWrapper < Callback
   instance_method set_c_callback: fun () {
     <primitive "curl_callback_curl_write_callback">

@@ -19,7 +19,7 @@ OBJS = $(CPP_FILES:%.cpp=%.o)
 
 DIST_FILES = $(CODE) $(BYTECODE) $(SO)
 
-%_prims.cpp: %.defs; $(call RUN_BINDGEN_CMD,$^) > $@ || rm $@
+%_prims.cpp: %.me; $(call RUN_BINDGEN_CMD,$^) > $@ || rm $@
 %.o: %.cpp; g++ $(CXXFLAGS) -fPIC -c -o $@ $^
 
 $(SUBDIRS): build; $(MAKE) -C $@

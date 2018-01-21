@@ -17,7 +17,7 @@ instance_method start: fun() {
   var xs = null;
   xs = this._many(fun() {
     this._apply(:definition);}, null);
-  return xs;
+  return xs.filter(fun(i) { i != null });
 }
 instance_method definition: fun() {
   var t = null;
@@ -40,6 +40,15 @@ instance_method definition: fun() {
     this._apply(:prefix);
     s = this._apply(:struct_def);
     return s;
+  }, fun() {
+    this._many(fun() {
+      this._or([fun() {
+        this._not(fun() {
+          this._apply(:prefix);});
+        this._apply(:anything);
+      }]);}, null);
+    this._apply_with_args(:seq, ["\n"]);
+    return null;
   }]);
 }
 instance_method prefix: fun() {
